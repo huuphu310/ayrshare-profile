@@ -1,0 +1,25 @@
+version: '3.8'
+
+services:
+  redis:
+    image: redis:6.0.9
+    container_name: u2-redis
+    networks:
+      - u2
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: u2-api
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    depends_on:
+      - redis
+    networks:
+      - u2
+
+networks:
+  u2:
+    driver: bridge
