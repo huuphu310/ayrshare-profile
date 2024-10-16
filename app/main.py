@@ -81,6 +81,56 @@ def run_blocking(func, *args, **kwargs):
 def shutdown_event():
     executor.shutdown(wait=True)
 
+@app.debug("/profile/{domain}/{id}")
+async def handle_profile(
+    domain: str = Path(..., description="The domain to fetch channels from"),
+    id: str = Path(..., description="The channel ID"),
+):
+    async with httpx.AsyncClient() as client_httpx:
+        # Step 1: Featch data from directus
+        directus_token = global_tokens.get(domain)
+        if not directus_token:
+            raise HTTPException(status_code=404, detail="Token not found for the given domain.")
+        if domain == "tcreator.cloud":
+            channels_api_url = f"https://{domain}/items/idols/{id}"
+        else:
+            channels_api_url = f"https://{domain}/items/channels/{id}"
+        headers = {
+            'Content-Type': 'application/json',
+            'Authorization': f"Bearer {directus_token}"
+        }
+        try:
+            channels_response = await client_httpx.get(channels_api_url, headers=headers)
+            channels_response.raise_for_status()
+            channels_data = channels_response.json()
+            ayrshare_key = channels_data.get("key")
+            ayrshare_profile = channels_data.get("profile")
+        except httpx.HTTPError as e:
+            raise HTTPException(status_code=500, detail=f"Error calling channels API: {e}")
+        # Step 2: call ayrshare delete profile
+        url = "https://app.ayrshare.com/api/profiles/profile"
+        headers = {
+            'Authorization': f"Bearer {AYRSHARE_API_KEY}",
+            'Content-Type': 'application/json',
+            'Profile-Key': ayrshare_key
+        }
+        try:
+            channels_response = await client_httpx.delete(url, headers=headers)
+            channels_response.raise_for_status()
+        except httpx.HTTPError as e:
+            raise HTTPException(status_code=500, detail=f"Error calling channels API: {e}")
+
+        # Step 3: update used = false in mongodb
+        try:
+            profile_doc_future = run_blocking(
+                profiles_collection.find_one_and_update,
+                {"profile": ayrshare_profile},
+                {"$set": {"used": False}},
+                return_document=ReturnDocument.AFTER
+            )
+        except PyMongoError as e:
+            raise HTTPException(status_code=500, detail=f"Error updating profiles in MongoDB: {e}")
+
 @app.get("/profile/{domain}/{id}")
 async def handle_profile(
     domain: str = Path(..., description="The domain to fetch channels from"),
@@ -145,12 +195,14 @@ async def handle_profile(
         except PyMongoError as e:
             raise HTTPException(status_code=500, detail=f"Error updating profiles in MongoDB: {e}")
 
-        # Step 3: Call the domain-specific channels API
+        # Step 4: Call the domain-specific channels API
         directus_token = global_tokens.get(domain)
         if not directus_token:
             raise HTTPException(status_code=404, detail="Token not found for the given domain.")
-
-        channels_api_url = f"https://{domain}/items/channels/{id}"
+        if domain == "tcreator.cloud":
+            channels_api_url = f"https://{domain}/items/idols/{id}"
+        else:
+            channels_api_url = f"https://{domain}/items/channels/{id}"
         payload = json.dumps({
             "key": profileKey,
             "profile": profile
@@ -166,7 +218,7 @@ async def handle_profile(
         except httpx.HTTPError as e:
             raise HTTPException(status_code=500, detail=f"Error calling channels API: {e}")
 
-        # Step 4: If profileKey exists, generate JWT URL
+        # Step 5: If profileKey exists, generate JWT URL
         if profileKey:
             generate_jwt_url = "https://app.ayrshare.com/api/profiles/generateJWT"
             jwt_payload = f'domain=id-oqsv9&privateKey=-----BEGIN%20RSA%20PRIVATE%20KEY-----%0AMIIEowIBAAKCAQEA8T9eeYVkoWY8HEPZX%2BhcIxVxFzMSrKgV8XlaSG6ov6l2pRiv%0A8iYZ3hflwe10ASm%2B5NUsVsD3%2BstuYjIbnhCawXs%2B6VfLV8myn8y%2B0DiGGExoHkLQ%0AMgyIgzdJjEuoDdUf10ED8tFT6i3vdOp%2BonuH7c%2BHTT6KdtZEYOEQbVB%2BnOQvGk2C%0AcCCi%2FFxUUwcLyLwgJRo8Mu4ObTX8nIi2fRpgMOMJT5J3TVa%2BqUGakubutB7asZ0%2F%0AMOjnsU1bSlH2SmkxY2fJzYfvDf4J3BxyMB8qG2mnKAtH0SQFgQ3wLQArff2dn465%0AGLV9aWHeluFQDOrt9llVobcyFUKDMlp9ok1FVwIDAQABAoIBAC8mM%2BgrLmou6XOa%0AvRq19n%2Fy2lnu5Ojypus9TOxYGEnxLFuC8iwwzyBtaj2XE3OAvarKkPJZn32YEbhG%0AU8h2NVC4Lij7vCWpqWv635YhXe%2FUywqTA06szWdbwFeXl74wV5tBvSxRRgXAOYsP%0Ao3VNEFlllGt%2F3B7yrIWEpym%2BMCioPPK%2FifcV6wcL4r6%2F1EBCux4KPlx94TvjOJ36%0ALd3Aax5WLnpaAI6TnTEZYEEwEz9pw%2FnmgFOjwwGLPBucWcYXOEIq2fZxrdsGB7UC%0Ai8AtRESDDzqGJBp6qm7IKqiWatDBuaNn3%2BaIsNvmwlMRJBgrxcy0FV%2Ft80PJ3LM1%0ArsvG5PUCgYEA%2Fs8MtxEC1FsbuIzHeUi6eMoRdNKmghU3TrHuNRmr6ZioVUb72FPA%0A7v8tp64jZVeM8qsj%2FwH1FRjemZIalZuLGktTGJgR8%2F0JTb0e4LvRARn41InBj0df%0AGEZX1unG1wNSOs3%2Blh7haXWFQi407mB%2FMbbfrkerheYGCmCUGtFVAUsCgYEA8mAW%0A6v%2BAlEyhW8EUjQMKMMTYyFxY5vVNII5rOE7t7mPWjbA3qnc6dNxDY%2BW04zjflkQp%0AwktP1CDY5KjTzlyFuM8WTG4KWzA3r48ARWucWXAZxpWqkvDTTxNONXgB44VNNe0B%0AKlpSkOryAJNqaYCIW19tI%2FVvl6S0pwHgFrzUUKUCgYEAioeqlASNk0INKiJveELQ%0ADkddgjPcDrDWJtSZewj%2F67nxGpvC4%2FN02vqkqZsE513X5T6iDUvVIKkqrDdAeMHd%0AuGfnP2G9sPaKjlcZaHjzwjOKkpJqRyk4TAxCSTdDwTWvCQVhOeCEED%2ByOS7B3C9e%0AN3sC1M9mMx%2FBfPbQzlusaU0CgYAeIy6WV%2BDQD9s8gnygsBETUVa3SyxOw4%2Bsjajt%0AXnsdWlKyWYgCbULahwzmHgjo%2FAhpMd6TZzPs54ywmgGENmL2QOG%2F7SrifdNexAQ%2F%0AnYraYCMEW1XTYZiUy4y8%2F0gU111raCXt8z8y%2F9PJmIrxxWavHeV%2FRCR1EajY31XS%0A3fX0dQKBgBqE2iMfMnImPvdE31x6tRq14NOrwW3pCj1haWqk19Z3sabCM2LWzuEj%0AeoDmX6CVHHN2E5N%2FVZc%2B%2BQbGyOUsJBhUF4Okhaae%2BE0rhEtH7%2BMJJlf1H%2BjlUTAo%0ApvrFxVCUqXlm39Fn79h4FMEsitHodP8Ng2ZCN5UIdWUM7bV7%2Ftp%2F%0A-----END%20RSA%20PRIVATE%20KEY-----%0A&profileKey={profileKey}&logout=True&'
