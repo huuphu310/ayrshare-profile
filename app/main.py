@@ -81,8 +81,8 @@ def run_blocking(func, *args, **kwargs):
 def shutdown_event():
     executor.shutdown(wait=True)
 
-@app.debug("/profile/{domain}/{id}")
-async def handle_profile(
+@app.get("/delete-profile/{domain}/{id}")
+async def delete_profile(
     domain: str = Path(..., description="The domain to fetch channels from"),
     id: str = Path(..., description="The channel ID"),
 ):
@@ -102,9 +102,11 @@ async def handle_profile(
         try:
             channels_response = await client_httpx.get(channels_api_url, headers=headers)
             channels_response.raise_for_status()
-            channels_data = channels_response.json()
+            channels_data = channels_response.json().get("data")
+            print(channels_data)
             ayrshare_key = channels_data.get("key")
             ayrshare_profile = channels_data.get("profile")
+            print(ayrshare_key, ayrshare_profile)
         except httpx.HTTPError as e:
             raise HTTPException(status_code=500, detail=f"Error calling channels API: {e}")
         # Step 2: call ayrshare delete profile
@@ -124,8 +126,9 @@ async def handle_profile(
         try:
             profile_doc_future = run_blocking(
                 profiles_collection.find_one_and_update,
-                {"profile": ayrshare_profile},
+                {"profile": ayrshare_profile, "domain": domain},
                 {"$set": {"used": False}},
+                upsert=True,
                 return_document=ReturnDocument.AFTER
             )
         except PyMongoError as e:
