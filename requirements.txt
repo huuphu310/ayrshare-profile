@@ -7,3 +7,8 @@ python-dotenv~=1.0.1
 uvicorn
 pydantic~=2.9.0
 pymongo~=4.9.1
+python-dotenv
+httpx
+pymongo
+python-telegram-bot
+python-crontab
