@@ -177,13 +177,14 @@ async def ayrshare_generate_jwt(client_httpx: httpx.AsyncClient, profile_key: st
         "domain": "id-oqsv9",
         "privateKey": private_key,
         "profileKey": profile_key,
-        "logout": "True"
+        "logout": True
     }
     headers = {
-        'Authorization': f'Bearer {AYRSHARE_API_KEY}'
+        'Authorization': f'Bearer {AYRSHARE_API_KEY}',
+        'Content-Type': 'application/json'
     }
     try:
-        response = await client_httpx.post("https://app.ayrshare.com/api/profiles/generateJWT", data=payload, headers=headers)
+        response = await client_httpx.post("https://api.ayrshare.com/api/profiles/generateJWT", json=payload, headers=headers)
         response.raise_for_status()
         return response.json()
     except httpx.HTTPError as e:
