@@ -144,13 +144,46 @@ async def ayrshare_create_profile(client_httpx: httpx.AsyncClient, profile_title
         raise HTTPException(status_code=500, detail=f"Error creating Ayrshare profile: {e}")
 
 async def ayrshare_generate_jwt(client_httpx: httpx.AsyncClient, profile_key: str):
-    jwt_payload = f'domain=id-oqsv9&privateKey=-----BEGIN%20RSA%20PRIVATE%20KEY-----%0AMIIEowIBAAKCAQEA8T9eeYVkoWY8HEPZX%2BhcIxVxFzMSrKgV8XlaSG6ov6l2pRiv%0A8iYZ3hflwe10ASm%2B5NUsVsD3%2BstuYjIbnhCawXs%2B6VfLV8myn8y%2B0DiGGExoHkLQ%0AMgyIgzdJjEuoDdUf10ED8tFT6i3vdOp%2BonuH7c%2BHTT6KdtZEYOEQbVB%2BnOQvGk2C%0AcCCi%2FFxUUwcLyLwgJRo8Mu4ObTX8nIi2fRpgMOMJT5J3TVa%2BqUGakubutB7asZ0%2F%0AMOjnsU1bSlH2SmkxY2fJzYfvDf4J3BxyMB8qG2mnKAtH0SQFgQ3wLQArff2dn465%0AGLV9aWHeluFQDOrt9llVobcyFUKDMlp9ok1FVwIDAQABAoIBAC8mM%2BgrLmou6XOa%0AvRq19n%2Fy2lnu5Ojypus9TOxYGEnxLFuC8iwwzyBtaj2XE3OAvarKkPJZn32YEbhG%0AU8h2NVC4Lij7vCWpqWv635YhXe%2FUywqTA06szWdbwFeXl74wV5tBvSxRRgXAOYsP%0Ao3VNEFlllGt%2F3B7yrIWEpym%2BMCioPPK%2FifcV6wcL4r6%2F1EBCux4KPlx94TvjOJ36%0ALd3Aax5WLnpaAI6TnTEZYEEwEz9pw%2FnmgFOjwwGLPBucWcYXOEIq2fZxrdsGB7UC%0Ai8AtRESDDzqGJBp6qm7IKqiWatDBuaNn3%2BaIsNvmwlMRJBgrxcy0FV%2Ft80PJ3LM1%0ArsvG5PUCgYEA%2Fs8MtxEC1FsbuIzHeUi6eMoRdNKmghU3TrHuNRmr6ZioVUb72FPA%0A7v8tp64jZVeM8qsj%2FwH1FRjemZIalZuLGktTGJgR8%2F0JTb0e4LvRARn41InBj0df%0AGEZX1unG1wNSOs3%2Blh7haXWFQi407mB%2FMbbfrkerheYGCmCUGtFVAUsCgYEA8mAW%0A6v%2BAlEyhW8EUjQMKMMTYyFxY5vVNII5rOE7t7mPWjbA3qnc6dNxDY%2BW04zjflkQp%0AwktP1CDY5KjTzlyFuM8WTG4KWzA3r48ARWucWXAZxpWqkvDTTxNONXgB44VNNe0B%0AKlpSkOryAJNqaYCIW19tI%2FVvl6S0pwHgFrzUUKUCgYEAioeqlASNk0INKiJveELQ%0ADkddgjPcDrDWJtSZewj%2F67nxGpvC4%2FN02vqkqZsE513X5T6iDUvVIKkqrDdAeMHd%0AuGfnP2G9sPaKjlcZaHjzwjOKkpJqRyk4TAxCSTdDwTWvCQVhOeCEED%2ByOS7B3C9e%0AN3sC1M9mMx%2FBfPbQzlusaU0CgYAeIy6WV%2BDQD9s8gnygsBETUVa3SyxOw4%2Bsjajt%0AXnsdWlKyWYgCbULahwzmHgjo%2FAhpMd6TZzPs54ywmgGENmL2QOG%2F7SrifdNexAQ%0AnYraYCMEW1XTYZiUy4y8%2F0gU111raCXt8z8y%2F9PJmIrxxWavHeV%2FRCR1EajY31XS%0A3fX0dQKBgBqE2iMfMnImPvdE31x6tRq14NOrwW3pCj1haWqk19Z3sabCM2LWzuEj%0AeoDmX6CVHHN2E5N%2FVZc%2B%2BQbGyOUsJBhUF4Okhaae%2BE0rhEtH7%2BMJJlf1H%2BjlUTAo%0ApvrFxVCUqXlm39Fn79h4FMEsitHodP8Ng2ZCN5UIdWUM7bV7%2Ftp%2F%0A-----END%20RSA%20PRIVATE%20KEY-----%0A&profileKey={profile_key}&logout=True&'
+    private_key = (
+        "-----BEGIN RSA PRIVATE KEY-----\n"
+        "MIIEowIBAAKCAQEA8T9eeYVkoWY8HEPZX+hcIxVxFzMSrKgV8XlaSG6ov6l2pRiv\n"
+        "8iYZ3hflwe10ASm+5NUsVsD3+stuYjIbnhCawXs+6VfLV8myn8y+0DiGGExoHkLQ\n"
+        "MgyIgzdJjEuoDdUf10ED8tFT6i3vdOp+onuH7c+HTT6KdtZEYOEQbVB+nOQvGk2C\n"
+        "cCCi/FxUUwcLyLwgJRo8Mu4ObTX8nIi2fRpgMOMJT5J3TVa+qUGakubutB7asZ0/\n"
+        "MOjnsU1bSlH2SmkxY2fJzYfvDf4J3BxyMB8qG2mnKAtH0SQFgQ3wLQArff2dn465\n"
+        "GLV9aWHeluFQDOrt9llVobcyFUKDMlp9ok1FVwIDAQABAoIBAC8mM+grLmou6XOa\n"
+        "vRq19n/y2lnu5Ojypus9TOxYGEnxLFuC8iwwzyBtaj2XE3OAvarKkPJZn32YEbhG\n"
+        "U8h2NVC4Lij7vCWpqWv635YhXe/UywqTA06szWdbwFeXl74wV5tBvSxRRgXAOYsP\n"
+        "o3VNEFlllGt/3B7yrIWEpym+MCioPPK/ifcV6wcL4r6/1EBCux4KPlx94TvjOJ36\n"
+        "Ld3Aax5WLnpaAI6TnTEZYEEwEz9pw/nmgFOjwwGLPBucWcYXOEIq2fZxrdsGB7UC\n"
+        "i8AtRESDDzqGJBp6qm7IKqiWatDBuaNn3+aIsNvmwlMRJBgrxcy0FV/t80PJ3LM1\n"
+        "rsvG5PUCgYEA/s8MtxEC1FsbuIzHeUi6eMoRdNKmghU3TrHuNRmr6ZioVUb72FPA\n"
+        "7v8tp64jZVeM8qsj/wH1FRjemZIalZuLGktTGJgR8/0JTb0e4LvRARn41InBj0df\n"
+        "GEZX1unG1wNSOs3+lh7haXWFQi407mB/MbbfrkerheYGCmCUGtFVAUsCgYEA8mAW\n"
+        "6v+AlEyhW8EUjQMKMMTYyFxY5vVNII5rOE7t7mPWjbA3qnc6dNxDY+W04zjflkQp\n"
+        "wktP1CDY5KjTzlyFuM8WTG4KWzA3r48ARWucWXAZxpWqkvDTTxNONXgB44VNNe0B\n"
+        "KlpSkOryAJNqaYCIW19tI/Vvl6S0pwHgFrzUUKUCgYEAioeqlASNk0INKiJveELQ\n"
+        "DkddgjPcDrDWJtSZewj/67nxGpvC4/N02vqkqZsE513X5T6iDUvVIKkqrDdAeMHd\n"
+        "uGfnP2G9sPaKjlcZaHjzwjOKkpJqRyk4TAxCSTdDwTWvCQVhOeCEED+yOS7B3C9e\n"
+        "N3sC1M9mMx/BfPbQzlusaU0CgYAeIy6WV+DQD9s8gnygsBETUVa3SyxOw4+sjajt\n"
+        "XnsdWlKyWYgCbULahwzmHgjo/AhpMd6TZzPs54ywmgGENmL2QOG/7SrifdNexAQ/\n"
+        "nYraYCMEW1XTYZiUy4y8/0gU111raCXt8z8y/9PJmIrxxWavHeV/RCR1EajY31XS\n"
+        "3fX0dQKBgBqE2iMfMnImPvdE31x6tRq14NOrwW3pCj1haWqk19Z3sabCM2LWzuEj\n"
+        "eoDmX6CVHHN2E5N/VZc++QbGyOUsJBhUF4Okhaae+E0rhEtH7+MJJlf1H+jlUTAo\n"
+        "pvrFxVCUqXlm39Fn79h4FMEsitHodP8Ng2ZCN5UIdWUM7bV7/tp/\n"
+        "-----END RSA PRIVATE KEY-----\n"
+    )
+    payload = {
+        "domain": "id-oqsv9",
+        "privateKey": private_key,
+        "profileKey": profile_key,
+        "logout": "True"
+    }
     headers = {
-        'Authorization': f'Bearer {AYRSHARE_API_KEY}',
-        'Content-Type': 'application/x-www-form-urlencoded'
+        'Authorization': f'Bearer {AYRSHARE_API_KEY}'
     }
     try:
-        response = await client_httpx.post("https://app.ayrshare.com/api/profiles/generateJWT", data=jwt_payload, headers=headers)
+        response = await client_httpx.post("https://app.ayrshare.com/api/profiles/generateJWT", data=payload, headers=headers)
         response.raise_for_status()
         return response.json()
     except httpx.HTTPError as e:
