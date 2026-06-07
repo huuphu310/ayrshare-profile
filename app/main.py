@@ -202,28 +202,37 @@ async def delete_profile(
         ayrshare_key = directus_data.get("key")
         ayrshare_profile = directus_data.get("profile")
 
-        if not ayrshare_key:
-            raise HTTPException(status_code=400, detail="Profile key not found in Directus.")
-
-        # Step 2: call ayrshare delete profile
-        await ayrshare_delete_profile(client_httpx, ayrshare_key)
+        # Step 2: call ayrshare delete profile if key exists
+        if ayrshare_key:
+            try:
+                await ayrshare_delete_profile(client_httpx, ayrshare_key)
+            except Exception as e:
+                print(f"Warning: Ayrshare delete profile failed: {e}")
 
         # Step 3: update used = false and reset fields in mongodb
         try:
-            run_blocking(
-                profiles_collection.find_one_and_update,
-                {"profile": ayrshare_profile, "domain": domain},
-                {"$set": {
-                    "used": False,
-                    "profileKey": None,
-                    "refId": None,
-                    "networks": {
-                        "tiktok": False,
-                        "short": False
-                    }
-                }},
-                upsert=True
-            )
+            query = {}
+            if ayrshare_profile:
+                query["profile"] = ayrshare_profile
+            elif ayrshare_key:
+                query["profileKey"] = ayrshare_key
+
+            if query:
+                query["domain"] = domain
+                run_blocking(
+                    profiles_collection.find_one_and_update,
+                    query,
+                    {"$set": {
+                        "used": False,
+                        "profileKey": None,
+                        "refId": None,
+                        "networks": {
+                            "tiktok": False,
+                            "short": False
+                        }
+                    }},
+                    upsert=True
+                )
         except PyMongoError as e:
             raise HTTPException(status_code=500, detail=f"Error updating profiles in MongoDB: {e}")
 
@@ -244,17 +253,29 @@ async def delete_network(
         if not platform:
             raise HTTPException(status_code=400, detail="Platform not found in Directus data.")
 
-        # Step 2: Delete network from Ayrshare profile
-        await ayrshare_delete_network(client_httpx, ayrshare_key, platform)
+        # Step 2: Delete network from Ayrshare profile if key exists
+        if ayrshare_key:
+            try:
+                await ayrshare_delete_network(client_httpx, ayrshare_key, platform)
+            except Exception as e:
+                print(f"Warning: Ayrshare delete network failed: {e}")
 
         # Step 3: Update MongoDB networks to False
         try:
-            run_blocking(
-                profiles_collection.find_one_and_update,
-                {"profile": ayrshare_profile, "domain": domain},
-                {"$set": {f"networks.{platform}": False}},
-                upsert=True
-            )
+            query = {}
+            if ayrshare_profile:
+                query["profile"] = ayrshare_profile
+            elif ayrshare_key:
+                query["profileKey"] = ayrshare_key
+
+            if query:
+                query["domain"] = domain
+                run_blocking(
+                    profiles_collection.find_one_and_update,
+                    query,
+                    {"$set": {f"networks.{platform}": False}},
+                    upsert=True
+                )
         except PyMongoError as e:
             raise HTTPException(status_code=500, detail=f"MongoDB update failed: {e}")
 
