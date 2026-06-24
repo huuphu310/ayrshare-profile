@@ -151,7 +151,15 @@ async def ayrshare_get_active_accounts(client_httpx: httpx.AsyncClient, profile_
         response.raise_for_status()
         # activeSocialAccounts is omitted entirely when nothing is linked.
         return response.json().get("activeSocialAccounts", [])
+    except httpx.HTTPStatusError as e:
+        # 403/404 means the profile no longer exists on Ayrshare (e.g. it was already
+        # deleted, so its Profile-Key is now invalid). Treat it as "nothing linked" so
+        # the caller cleans up local state instead of failing.
+        if e.response.status_code in (403, 404):
+            return []
+        raise HTTPException(status_code=500, detail=f"Error fetching Ayrshare active accounts: {e}")
     except httpx.HTTPError as e:
+        # Network/timeout error -> real state unknown -> propagate so we don't clear local data.
         raise HTTPException(status_code=500, detail=f"Error fetching Ayrshare active accounts: {e}")
 
 async def ayrshare_delete_network(client_httpx: httpx.AsyncClient, profile_key: str, platform: str):
@@ -171,6 +179,12 @@ async def ayrshare_delete_network(client_httpx: httpx.AsyncClient, profile_key: 
             json=payload
         )
         response.raise_for_status()
+    except httpx.HTTPStatusError as e:
+        # 403/404 means the profile is already gone on Ayrshare -> the network is
+        # effectively unlinked, so treat it as success and let local cleanup proceed.
+        if e.response.status_code in (403, 404):
+            return
+        raise HTTPException(status_code=500, detail=f"Error deleting Ayrshare network: {e}")
     except httpx.HTTPError as e:
         raise HTTPException(status_code=500, detail=f"Error deleting Ayrshare network: {e}")
 
