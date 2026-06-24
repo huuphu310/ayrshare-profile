@@ -20,6 +20,12 @@ AYRSHARE_API_KEY = os.getenv("AYRSHARE_API_KEY", "your_api_key_here")  # Replace
 DATABASE_NAME = os.getenv("DATABASE_NAME", "your_database_name")
 DIRECTUS_AUTH_TOKEN = os.getenv("DIRECTUS_AUTH_TOKEN", "your_directus_auth_token_here")  # Replace with your actual token
 
+# Map internal network names (used in MongoDB/Directus) to Ayrshare platform names.
+# e.g. "short" is our label for YouTube Shorts, but Ayrshare expects "youtube".
+NETWORK_TO_AYRSHARE = {
+    "short": "youtube",
+}
+
 app = FastAPI()
 
 # Initialize MongoDB client
@@ -100,6 +106,23 @@ async def get_directus_data(client_httpx: httpx.AsyncClient, domain: str, id: st
     except httpx.HTTPError as e:
         raise HTTPException(status_code=500, detail=f"Error calling Directus API: {e}")
 
+async def update_directus_data(client_httpx: httpx.AsyncClient, domain: str, id: str, fields: dict):
+    directus_token = global_tokens.get(domain)
+    if not directus_token:
+        raise HTTPException(status_code=404, detail="Token not found for the given domain.")
+
+    api_url = f"https://{domain}/items/idols/{id}" if domain == "tcreator.cloud" else f"https://{domain}/items/channels/{id}"
+    headers = {
+        'Content-Type': 'application/json',
+        'Authorization': f"Bearer {directus_token}"
+    }
+
+    try:
+        response = await client_httpx.patch(api_url, json=fields, headers=headers)
+        response.raise_for_status()
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=500, detail=f"Error updating Directus API: {e}")
+
 async def ayrshare_delete_profile(client_httpx: httpx.AsyncClient, profile_key: str):
     headers = {
         'Authorization': f"Bearer {AYRSHARE_API_KEY}",
@@ -112,6 +135,25 @@ async def ayrshare_delete_profile(client_httpx: httpx.AsyncClient, profile_key: 
     except httpx.HTTPError as e:
         raise HTTPException(status_code=500, detail=f"Error deleting Ayrshare profile: {e}")
 
+async def ayrshare_get_active_accounts(client_httpx: httpx.AsyncClient, profile_key: str):
+    """Return the list of social platforms currently linked to the given profile.
+
+    Used to check whether a network still exists before trying to unlink it. If the
+    call fails (e.g. timeout) it raises, so the caller can stop and avoid clearing
+    local state while the real Ayrshare state is unknown.
+    """
+    headers = {
+        'Authorization': f"Bearer {AYRSHARE_API_KEY}",
+        'Profile-Key': profile_key
+    }
+    try:
+        response = await client_httpx.get("https://api.ayrshare.com/api/user", headers=headers)
+        response.raise_for_status()
+        # activeSocialAccounts is omitted entirely when nothing is linked.
+        return response.json().get("activeSocialAccounts", [])
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching Ayrshare active accounts: {e}")
+
 async def ayrshare_delete_network(client_httpx: httpx.AsyncClient, profile_key: str, platform: str):
     headers = {
         'Authorization': f"Bearer {AYRSHARE_API_KEY}",
@@ -120,9 +162,11 @@ async def ayrshare_delete_network(client_httpx: httpx.AsyncClient, profile_key: 
     }
     payload = {'platform': platform}
     try:
+        # Unlink a single social network from the profile (keeps the profile itself).
+        # NOTE: /api/profiles/social unlinks the network; /api/profiles/profile deletes the whole profile.
         response = await client_httpx.request(
             "DELETE",
-            "https://app.ayrshare.com/api/profiles/profile",
+            "https://api.ayrshare.com/api/profiles/social",
             headers=headers,
             json=payload
         )
@@ -253,12 +297,24 @@ async def delete_network(
         if not platform:
             raise HTTPException(status_code=400, detail="Platform not found in Directus data.")
 
-        # Step 2: Delete network from Ayrshare profile if key exists
+        # Translate our internal network name to the platform name Ayrshare expects
+        # (e.g. "short" -> "youtube"). MongoDB keeps using the original name below.
+        ayrshare_platform = NETWORK_TO_AYRSHARE.get(platform, platform)
+
+        # Step 2: Make sure the network is actually gone on Ayrshare before we touch
+        # our own data. We check existence first so that if a previous call timed out
+        # *after* Ayrshare had already unlinked it, this retry just cleans up locally
+        # instead of calling delete again.
+        #
+        # If Ayrshare errors/times out here (existence check OR unlink), we raise and
+        # stop WITHOUT clearing MongoDB/Directus, so the state stays consistent and a
+        # later retry can finish the job.
         if ayrshare_key:
-            try:
-                await ayrshare_delete_network(client_httpx, ayrshare_key, platform)
-            except Exception as e:
-                print(f"Warning: Ayrshare delete network failed: {e}")
+            active_accounts = await ayrshare_get_active_accounts(client_httpx, ayrshare_key)
+            if ayrshare_platform in active_accounts:
+                # Still linked -> unlink it (raises on failure -> no cleanup below).
+                await ayrshare_delete_network(client_httpx, ayrshare_key, ayrshare_platform)
+            # else: already unlinked on Ayrshare -> fall through and clean up locally.
 
         # Step 3: Update MongoDB networks to False
         try:
@@ -279,7 +335,14 @@ async def delete_network(
         except PyMongoError as e:
             raise HTTPException(status_code=500, detail=f"MongoDB update failed: {e}")
 
-        return {"status": "success", "message": f"{platform} network deleted"}
+        # Step 4: Clear the unlinked account info back in Directus (key, profile, app_id)
+        await update_directus_data(client_httpx, domain, id, {
+            "key": None,
+            "profile": None,
+            "app_id": None
+        })
+
+        return {"status": "success", "message": f"{platform} network unlinked"}
 
 @app.get("/profile/{domain}/{id}/{network}")
 async def get_profile_endpoint(
