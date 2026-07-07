@@ -22,8 +22,22 @@ DIRECTUS_AUTH_TOKEN = os.getenv("DIRECTUS_AUTH_TOKEN", "your_directus_auth_token
 
 # Map internal network names (used in MongoDB/Directus) to Ayrshare platform names.
 # e.g. "short" is our label for YouTube Shorts, but Ayrshare expects "youtube".
+# Used by the LEGACY endpoints that operate on the `idols`/`channels` collections.
 NETWORK_TO_AYRSHARE = {
     "short": "youtube",
+}
+
+# --- New "destinations" collection (multi-source/dest redesign) -------------
+# In the redesign, the `idols` collection is superseded by `destinations`.
+# Field mapping:  idols.key -> destinations.account_key,
+#                 idols.network -> destinations.platform,
+#                 idols.profile/app_id -> destinations.profile/app_id.
+# Unlike `idols.network`, `destinations.platform` already holds the Ayrshare-native
+# name (tiktok/youtube/facebook/douyin) so NO translation is needed for Ayrshare calls.
+# The MongoDB profile pool, however, still tracks slots under the legacy keys
+# tiktok/short, so we map the platform back to the pool's network key.
+PLATFORM_TO_POOL_NETWORK = {
+    "youtube": "short",
 }
 
 app = FastAPI()
@@ -112,6 +126,43 @@ async def update_directus_data(client_httpx: httpx.AsyncClient, domain: str, id:
         raise HTTPException(status_code=404, detail="Token not found for the given domain.")
 
     api_url = f"https://{domain}/items/idols/{id}" if domain == "tcreator.cloud" else f"https://{domain}/items/channels/{id}"
+    headers = {
+        'Content-Type': 'application/json',
+        'Authorization': f"Bearer {directus_token}"
+    }
+
+    try:
+        response = await client_httpx.patch(api_url, json=fields, headers=headers)
+        response.raise_for_status()
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=500, detail=f"Error updating Directus API: {e}")
+
+async def get_destination_data(client_httpx: httpx.AsyncClient, domain: str, id: str):
+    """Fetch a row from the new `destinations` collection (multi-source/dest redesign)."""
+    directus_token = global_tokens.get(domain)
+    if not directus_token:
+        raise HTTPException(status_code=404, detail="Token not found for the given domain.")
+
+    api_url = f"https://{domain}/items/destinations/{id}"
+    headers = {
+        'Content-Type': 'application/json',
+        'Authorization': f"Bearer {directus_token}"
+    }
+
+    try:
+        response = await client_httpx.get(api_url, headers=headers)
+        response.raise_for_status()
+        return response.json().get("data", {})
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=500, detail=f"Error calling Directus API: {e}")
+
+async def update_destination_data(client_httpx: httpx.AsyncClient, domain: str, id: str, fields: dict):
+    """Patch a row in the new `destinations` collection."""
+    directus_token = global_tokens.get(domain)
+    if not directus_token:
+        raise HTTPException(status_code=404, detail="Token not found for the given domain.")
+
+    api_url = f"https://{domain}/items/destinations/{id}"
     headers = {
         'Content-Type': 'application/json',
         'Authorization': f"Bearer {directus_token}"
@@ -443,3 +494,199 @@ async def get_profile_endpoint(
 
         # Step 5: Redirect to the JWT URL
         return RedirectResponse(url=jwt_data.get("url"), status_code=301)
+
+
+# ===========================================================================
+#  NEW API — operates on the `destinations` collection (multi-source/dest
+#  redesign). The LEGACY endpoints above (idols/channels) are kept unchanged
+#  for backward compatibility with the old system.
+#
+#  A destination row IS a single platform, so `platform` is read straight from
+#  the record instead of being passed in the URL. Buttons only need the item id:
+#    Link   -> GET /destinations/profile/{domain}/{id}
+#    Unlink -> GET /destinations/delete-network/{domain}/{id}
+#    Delete -> GET /destinations/delete-profile/{domain}/{id}
+# ===========================================================================
+@app.get("/destinations/profile/{domain}/{id}")
+async def link_destination_profile(
+    domain: str = Path(..., description="The Directus domain (e.g. tcreator.cloud)"),
+    id: str = Path(..., description="The destinations item ID"),
+):
+    async with httpx.AsyncClient(verify=certifi.where(), timeout=60.0) as client_httpx:
+        # Step 1: Read the destination; the platform comes from the record itself.
+        dest = await get_destination_data(client_httpx, domain, id)
+        platform = dest.get("platform")
+        if not platform:
+            raise HTTPException(status_code=400, detail="Platform not found in destination record.")
+
+        # The MongoDB profile pool still tracks slots under tiktok/short.
+        pool_network = PLATFORM_TO_POOL_NETWORK.get(platform, platform)
+
+        # Step 2: Grab an unused profile slot from the pool for this network.
+        try:
+            query = {f"networks.{pool_network}": False, "domain": domain}
+            profile_doc = run_blocking(profiles_collection.find_one, query).result()
+            if not profile_doc:
+                raise HTTPException(status_code=404, detail=f"No profiles available for {platform}.")
+            profile = profile_doc.get("profile")
+            profileKey = profile_doc.get("profileKey")
+        except PyMongoError as e:
+            raise HTTPException(status_code=500, detail=f"MongoDB query failed: {e}")
+
+        # Step 3: Create the Ayrshare profile if this pool slot has no key yet.
+        if not profileKey:
+            profile_data = await ayrshare_create_profile(client_httpx, profile)
+            if profile_data.get("status") != "success":
+                raise HTTPException(status_code=400, detail="Ayrshare profile creation failed.")
+
+            profileKey = profile_data.get("profileKey")
+            refId = profile_data.get("refId")
+
+            try:
+                run_blocking(
+                    profiles_collection.find_one_and_update,
+                    {"profile": profile, "domain": domain},
+                    {"$set": {
+                        f"networks.{pool_network}": True,
+                        "profileKey": profileKey,
+                        "refId": refId,
+                        "used": True
+                    }},
+                )
+            except PyMongoError as e:
+                raise HTTPException(status_code=500, detail=f"MongoDB update failed: {e}")
+        else:
+            try:
+                run_blocking(
+                    profiles_collection.find_one_and_update,
+                    {"profile": profile, "domain": domain},
+                    {"$set": {
+                        f"networks.{pool_network}": True,
+                        "used": True
+                    }},
+                )
+            except PyMongoError as e:
+                raise HTTPException(status_code=500, detail=f"MongoDB update failed: {e}")
+
+        # Step 4: Write the profile key/name back onto the destination row.
+        await update_destination_data(client_httpx, domain, id, {
+            "account_key": profileKey,
+            "profile": profile
+        })
+
+        # Step 5: Generate the JWT URL and redirect to the Ayrshare linking page.
+        jwt_data = await ayrshare_generate_jwt(client_httpx, profileKey)
+        if jwt_data.get("status") != "success":
+            raise HTTPException(status_code=400, detail="JWT generation failed.")
+
+        return RedirectResponse(url=jwt_data.get("url"), status_code=301)
+
+
+@app.get("/destinations/delete-network/{domain}/{id}")
+async def delete_destination_network(
+    domain: str = Path(..., description="The Directus domain (e.g. tcreator.cloud)"),
+    id: str = Path(..., description="The destinations item ID"),
+):
+    async with httpx.AsyncClient(verify=certifi.where(), timeout=60.0) as client_httpx:
+        # Step 1: Read the destination (platform, key and profile come from the record).
+        dest = await get_destination_data(client_httpx, domain, id)
+        ayrshare_key = dest.get("account_key")
+        ayrshare_profile = dest.get("profile")
+        platform = dest.get("platform")
+
+        if not platform:
+            raise HTTPException(status_code=400, detail="Platform not found in destination record.")
+
+        # `destinations.platform` is already the Ayrshare-native name -> no translation.
+        ayrshare_platform = platform
+        pool_network = PLATFORM_TO_POOL_NETWORK.get(platform, platform)
+
+        # Step 2: Only unlink on Ayrshare if the network is actually still linked.
+        # If Ayrshare errors/times out, we raise and stop WITHOUT clearing local state.
+        if ayrshare_key:
+            active_accounts = await ayrshare_get_active_accounts(client_httpx, ayrshare_key)
+            if ayrshare_platform in active_accounts:
+                await ayrshare_delete_network(client_httpx, ayrshare_key, ayrshare_platform)
+            # else: already unlinked on Ayrshare -> fall through and clean up locally.
+
+        # Step 3: Free the pool slot for this network.
+        try:
+            query = {}
+            if ayrshare_profile:
+                query["profile"] = ayrshare_profile
+            elif ayrshare_key:
+                query["profileKey"] = ayrshare_key
+
+            if query:
+                query["domain"] = domain
+                run_blocking(
+                    profiles_collection.find_one_and_update,
+                    query,
+                    {"$set": {f"networks.{pool_network}": False}},
+                    upsert=True
+                )
+        except PyMongoError as e:
+            raise HTTPException(status_code=500, detail=f"MongoDB update failed: {e}")
+
+        # Step 4: Clear the linked account info back on the destination row.
+        await update_destination_data(client_httpx, domain, id, {
+            "account_key": None,
+            "profile": None,
+            "app_id": None
+        })
+
+        return {"status": "success", "message": f"{platform} network unlinked"}
+
+
+@app.get("/destinations/delete-profile/{domain}/{id}")
+async def delete_destination_profile(
+    domain: str = Path(..., description="The Directus domain (e.g. tcreator.cloud)"),
+    id: str = Path(..., description="The destinations item ID"),
+):
+    async with httpx.AsyncClient(verify=certifi.where(), timeout=60.0) as client_httpx:
+        # Step 1: Read the destination.
+        dest = await get_destination_data(client_httpx, domain, id)
+        ayrshare_key = dest.get("account_key")
+        ayrshare_profile = dest.get("profile")
+
+        # Step 2: Delete the whole Ayrshare profile if a key exists.
+        if ayrshare_key:
+            try:
+                await ayrshare_delete_profile(client_httpx, ayrshare_key)
+            except Exception as e:
+                print(f"Warning: Ayrshare delete profile failed: {e}")
+
+        # Step 3: Reset the pool doc so its slot becomes available again.
+        try:
+            query = {}
+            if ayrshare_profile:
+                query["profile"] = ayrshare_profile
+            elif ayrshare_key:
+                query["profileKey"] = ayrshare_key
+
+            if query:
+                query["domain"] = domain
+                run_blocking(
+                    profiles_collection.find_one_and_update,
+                    query,
+                    {"$set": {
+                        "used": False,
+                        "profileKey": None,
+                        "refId": None,
+                        "networks": {
+                            "tiktok": False,
+                            "short": False
+                        }
+                    }},
+                    upsert=True
+                )
+        except PyMongoError as e:
+            raise HTTPException(status_code=500, detail=f"Error updating profiles in MongoDB: {e}")
+
+        # Step 4: Clear the linked account info back on the destination row.
+        await update_destination_data(client_httpx, domain, id, {
+            "account_key": None,
+            "app_id": None
+        })
+
+        return {"status": "success", "message": "Profile deleted successfully"}

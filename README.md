@@ -2,7 +2,46 @@
 
 This API provides functionality for managing profiles with network-specific states and authentication.
 
-## API Endpoints
+> **Two API generations live side by side.** The **legacy** endpoints (`/profile`, `/delete-network`,
+> `/delete-profile`) operate on the old `idols`/`channels` collections and are kept for backward
+> compatibility. The **new** endpoints under `/destinations/...` operate on the `destinations`
+> collection from the multi-source/dest redesign. New Directus buttons should point at the new API.
+
+## New API — `destinations` collection
+
+In the redesign the `idols` collection is superseded by `destinations`. Field mapping:
+
+| idols (legacy)  | destinations (new) |
+|-----------------|--------------------|
+| `key`           | `account_key`      |
+| `network`       | `platform`         |
+| `profile`       | `profile`          |
+| `app_id`        | `app_id`           |
+
+Key differences from the legacy API:
+
+- A destination row **is one platform**, so `platform` is read from the record — it is **not** passed in the URL.
+- `destinations.platform` already uses **Ayrshare-native names** (`tiktok`/`youtube`/`facebook`/`douyin`), so no `short→youtube` translation is needed for Ayrshare calls.
+- The MongoDB profile pool still tracks slots under the legacy keys `tiktok`/`short`, so `platform` is mapped back to the pool key (`youtube → short`) via `PLATFORM_TO_POOL_NETWORK`.
+
+### Endpoints
+
+| Action | Endpoint |
+|--------|----------|
+| Link (create/assign profile + JWT redirect) | `GET /destinations/profile/{domain}/{id}` |
+| Unlink a network                            | `GET /destinations/delete-network/{domain}/{id}` |
+| Delete the whole profile                    | `GET /destinations/delete-profile/{domain}/{id}` |
+
+`{id}` is the Directus **destinations** item id. `{domain}` is the Directus host (e.g. `tcreator.cloud`).
+
+### Directus button URLs (destinations collection)
+
+- **Link:** `https://<api-host>/destinations/profile/tcreator.cloud/{{id}}`
+- **Delete/Unlink:** `https://<api-host>/destinations/delete-network/tcreator.cloud/{{id}}`
+
+---
+
+## Legacy API Endpoints
 
 ### 1. Get Profile (`GET /profile/{domain}/{id}/{network}`)
 
