@@ -609,7 +609,10 @@ async def delete_destination_network(
                 await ayrshare_delete_network(client_httpx, ayrshare_key, ayrshare_platform)
             # else: already unlinked on Ayrshare -> fall through and clean up locally.
 
-        # Step 3: Free the pool slot for this network.
+        # Step 3: Mark this network as free in the MongoDB pool.
+        # NOTE: we do NOT delete the Ayrshare account/profile and we do NOT clear the
+        # destination record (account_key/profile/app_id stay). Unlinking only detaches
+        # the social network from the profile and flips the pool flag to false.
         try:
             query = {}
             if ayrshare_profile:
@@ -627,13 +630,6 @@ async def delete_destination_network(
                 )
         except PyMongoError as e:
             raise HTTPException(status_code=500, detail=f"MongoDB update failed: {e}")
-
-        # Step 4: Clear the linked account info back on the destination row.
-        await update_destination_data(client_httpx, domain, id, {
-            "account_key": None,
-            "profile": None,
-            "app_id": None
-        })
 
         return {"status": "success", "message": f"{platform} network unlinked"}
 
