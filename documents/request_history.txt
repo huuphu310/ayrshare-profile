@@ -1,0 +1,46 @@
+#Request
+curl --location 'https://api.ayrshare.com/api/history?startDate=2025-04-26T00%3A00%3A00Z&endDate=2025-04-26T23%3A59%3A59&limit=1&status=error' \
+--header 'Authorization: Bearer AYRSHARE_API_KEY' \
+--header 'Profile-Key: AYRSHARE_PROFILE_KEY'
+
+#response
+{
+    "history": [
+        {
+            "created": "2025-04-26T12:20:49Z",
+            "errors": [
+                {
+                    "action": "post",
+                    "status": "error",
+                    "code": 373,
+                    "message": "Too many TikTok posts in the last 24-hours. TikTok limits the number of posts per 24-hours to reduce spam. Please try again later.",
+                    "details": "This TikTok creator has made too many posts via OpenAPI in the last 24 hours, so this publishing attempt is blocked to minimize spam. The user can try again later or publish it in the mobile app instead.",
+                    "platform": "tiktok"
+                }
+            ],
+            "id": "SxTwWuWFxc7SpvAnROxH",
+            "isVideo": true,
+            "mediaUrls": [
+                "https://tcreator-videos.sfo2.digitaloceanspaces.com/ccreator/H8VCN3GG-NY_TCqEC.mp4"
+            ],
+            "platforms": [
+                "tiktok"
+            ],
+            "post": "전세계에 퍼질 한 송이 연꽃 #연등회",
+            "postIds": [],
+            "profileTitle": "C39",
+            "refId": "81ae29da0ff28138a2d45ba694e7fd85f8b17b05",
+            "scheduleDate": "2025-04-26T12:20:49Z",
+            "shortenLinks": false,
+            "status": "error",
+            "tikTokOptions": {
+                "thumbNailOffset": 3000
+            },
+            "type": "now"
+        }
+    ],
+    "refId": "81ae29da0ff28138a2d45ba694e7fd85f8b17b05",
+    "count": 1,
+    "lastUpdated": "2025-04-26T12:21:40.593Z",
+    "nextUpdate": "2025-04-26T12:21:40.593Z"
+}

@@ -1,0 +1,9 @@
+#mongo collection
+#ayrshare.profiles
+{
+  "used": true,
+  "domain": "tcreator.cloud",
+  "profile": "T12",
+  "profileKey": "AC0D51BB-32D740C2-96448000-296646A7",
+  "refId": "99b747774dd6cb7d96b9c7f8043258dc68ffe2f8"
+}

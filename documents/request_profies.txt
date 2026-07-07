@@ -1,0 +1,35 @@
+#request
+curl --location 'https://api.ayrshare.com/api/profiles' \
+--header 'Authorization: Bearer AYRSHARE_API_KEY'
+
+#Response
+{
+    "profiles": [
+        {
+            "activeSocialAccounts": [
+                "tiktok"
+            ],
+            "created": {
+                "_seconds": 1736500428,
+                "_nanoseconds": 1000000
+            },
+            "createdUTC": "2025-01-10T09:13:48.001Z",
+            "refId": "fa5b17e31599d2644f6c7ec5e79ddd5dbf153631",
+            "status": "active",
+            "title": "C34"
+        },
+        {
+            "activeSocialAccounts": [
+                "tiktok"
+            ],
+            "created": {
+                "_seconds": 1744019677,
+                "_nanoseconds": 675000000
+            },
+            "createdUTC": "2025-04-07T09:54:37.675Z",
+            "refId": "a4b8f861155777a67c3eace7bd8747501ec0e1bc",
+            "status": "active",
+            "title": "T88"
+        }    ],
+    "count": 2
+}
